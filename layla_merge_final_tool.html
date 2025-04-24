@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Tool Merge Truyện (FINAL)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    .log { white-space: pre-wrap; font-size: 14px; background: #f2f2f2; border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
+    input, button { margin-top: 10px; padding: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Tool Merge Truyện (FINAL)</h1>
+  <p>Kéo nhiều file ZIP truyện đã split vào, tool sẽ gộp thành ZIP chuẩn có index tổng + info tổng.</p>
+  <input type="file" id="zipInput" multiple><br>
+  <button onclick="merge()">Gộp và Tải ZIP</button>
+  <div class="log" id="log"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script>
+    const log = document.getElementById("log");
+
+    function escapeHTML(str) {
+      return str.replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+    }
+
+    function logMsg(msg) {
+      log.innerHTML += msg + '\n';
+    }
+
+    async function merge() {
+      const files = document.getElementById("zipInput").files;
+      if (!files.length) return alert("Chưa chọn file ZIP!");
+      log.textContent = "Đang xử lý...\n";
+
+      const outZip = new JSZip();
+      const list = [];
+
+      for (const file of files) {
+        try {
+          logMsg("Đang xử lý: " + file.name);
+          const zip = await JSZip.loadAsync(file);
+          const folderName = file.name.replace(/\.zip$/i, '').replace(/[^a-zA-Z0-9-_]/g, "_");
+          const sub = outZip.folder(folderName);
+          const parts = [];
+
+          for (const path in zip.files) {
+            const entry = zip.files[path];
+            if (!entry.dir) {
+              const blob = await entry.async("uint8array");
+              const filename = path.split('/').pop();
+              sub.file(filename, blob);
+              if (filename.match(/^part.*\.txt$/i)) parts.push(filename);
+            }
+          }
+
+          // index.html từng truyện
+          const index = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${folderName}</title>
+<style>body{font-family:sans-serif;padding:20px}a{display:block;margin:4px 0}</style></head><body>
+<h1>${folderName}</h1><ul>${parts.map(p => `<li><a href="${p}" target="_blank">${p}</a></li>`).join('')}</ul></body></html>`;
+          sub.file("index.html", index);
+
+          // info.json từng truyện
+          const info = { title: folderName, tags: [], status: "unknown", source: "LaylaMerge" };
+          sub.file("info.json", JSON.stringify(info, null, 2));
+
+          list.push({ folder: folderName, title: folderName, tags: [], status: "unknown" });
+          logMsg("✔ Xong: " + folderName);
+        } catch (err) {
+          logMsg("❌ Lỗi " + file.name + ": " + err.message);
+        }
+      }
+
+      // Tạo index.html tổng
+      const globalIndex = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Danh sách truyện</title>
+<style>body{font-family:sans-serif;padding:20px}.t{margin-bottom:10px}.t span{color:#777}</style></head><body>
+<h1>Danh sách truyện</h1>${
+        list.map(e => `<div class="t"><a href="${e.folder}/index.html">${escapeHTML(e.title)}</a> <span>${e.status}</span></div>`).join('')
+      }</body></html>`;
+      outZip.file("index.html", globalIndex);
+      outZip.file("info.json", JSON.stringify(list, null, 2));
+
+      const blob = await outZip.generateAsync({type:"blob"});
+      saveAs(blob, "Layla_Merged_Full.zip");
+      logMsg("\n✅ Hoàn tất!");
+    }
+  </script>
+</body>
+</html>
